@@ -1,0 +1,296 @@
+# -*- coding: utf-8 -*-
+"""
+2D Unet-like architecture code in Pytorch
+"""
+import math
+import numpy as np
+from model.layers import *
+from model.dsbn import DomainSpecificBatchNorm2d
+import torch.nn as nn
+import torch.nn.functional as F
+import torch
+
+class MyUpsample2(nn.Module):
+    def forward(self, x):
+        return x[:, :, :, None, :, None].expand(-1, -1, -1, 2, -1, 2).reshape(x.size(0), x.size(1), x.size(2)*2, x.size(3)*2)
+
+
+def normalization(planes, norm='gn', num_domains=None, momentum=0.1):
+    if norm == 'dsbn':
+        m = DomainSpecificBatchNorm2d(planes, num_domains=num_domains, momentum=momentum)
+    elif norm == 'bn':
+        m = nn.BatchNorm2d(planes)
+    elif norm == 'gn':
+        m = nn.GroupNorm(1, planes)
+    elif norm == 'in':
+        m = nn.InstanceNorm2d(planes)
+    else:
+        raise ValueError('Normalization type {} is not supporter'.format(norm))
+    return m
+
+#### Note: All are functional units except the norms, which are sequential
+class ConvD(nn.Module):
+    def __init__(self, inplanes, planes, norm='bn', first=False, num_domains=None, momentum=0.1):
+        super(ConvD, self).__init__()
+
+        self.first = first
+        self.conv1 = nn.Conv2d(inplanes, planes, 3, 1, 1, bias=True)
+        self.bn1   = normalization(planes, norm, num_domains, momentum=momentum)
+
+        self.conv2 = nn.Conv2d(planes, planes, 3, 1, 1, bias=True)
+        self.bn2   = normalization(planes, norm, num_domains, momentum=momentum)
+
+        self.conv3 = nn.Conv2d(planes, planes, 3, 1, 1, bias=True)
+        self.bn3   = normalization(planes, norm, num_domains, momentum=momentum)
+
+    def forward(self, x, weights=None, layer_idx=None, domain_label=None):
+
+        if weights == None:
+            weight_1, bias_1 = self.conv1.weight, self.conv1.bias
+            weight_2, bias_2 = self.conv2.weight, self.conv2.bias
+            weight_3, bias_3 = self.conv3.weight, self.conv3.bias
+
+        else:
+            weight_1, bias_1 = weights[layer_idx+'.conv1.weight'], weights[layer_idx+'.conv1.bias']
+            weight_2, bias_2 = weights[layer_idx+'.conv2.weight'], weights[layer_idx+'.conv2.bias']
+            weight_3, bias_3 = weights[layer_idx+'.conv3.weight'], weights[layer_idx+'.conv3.bias']
+
+        if not self.first:
+            x = maxpool2D(x, kernel_size=2)
+
+        #layer 1 conv, bn
+        x = conv2d(x, weight_1, bias_1)
+        if domain_label is not None:
+            x, _ = self.bn1(x, domain_label)
+        else:
+            x = self.bn1(x)
+
+        #layer 2 conv, bn, relu
+        y = conv2d(x, weight_2, bias_2)
+        if domain_label is not None:
+            y, _ = self.bn2(y, domain_label)
+        else:
+            y = self.bn2(y)
+        y = relu(y)
+
+        #layer 3 conv, bn
+        z = conv2d(y, weight_3, bias_3)
+        if domain_label is not None:
+            z, _ = self.bn3(z, domain_label)
+        else:
+            z = self.bn3(z)
+        z = relu(z)
+
+        return z
+
+class ConvU(nn.Module):
+    def __init__(self, planes, norm='bn', first=False, num_domains=None, momentum=0.1):
+        super(ConvU, self).__init__()
+
+        self.first = first
+        if self.first:
+            self.pool = MyUpsample2()
+            self.conv2 = nn.Conv2d(planes, planes//2, 1, 1, 0, bias=True)
+            self.bn2   = normalization(planes//2, norm, num_domains, momentum=momentum)
+
+            self.conv3 = nn.Conv2d(planes, planes, 3, 1, 1, bias=True)
+            self.bn3   = normalization(planes, norm, num_domains, momentum=momentum)
+
+        else:
+            self.conv1 = nn.Conv2d(2*planes, planes, 3, 1, 1, bias=True)
+            self.bn1   = normalization(planes, norm, num_domains, momentum=momentum)
+
+            self.pool = MyUpsample2()
+            self.conv2 = nn.Conv2d(planes, planes//2, 1, 1, 0, bias=True)
+            self.bn2   = normalization(planes//2, norm, num_domains, momentum=momentum)
+
+            self.conv2_2 = nn.Conv2d(planes, planes//2, 1, 1, 0, bias=True)
+            self.bn2_2   = normalization(planes//2, norm, num_domains, momentum=momentum)
+
+            self.conv3 = nn.Conv2d(planes, planes, 3, 1, 1, bias=True)
+            self.bn3   = normalization(planes, norm, num_domains, momentum=momentum)
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, prev, weights=None, layer_idx=None, domain_label=None):
+
+        if weights == None:
+            if self.first:
+                weight_2, bias_2 = self.conv2.weight, self.conv2.bias
+                weight_3, bias_3 = self.conv3.weight, self.conv3.bias
+
+            else:
+                weight_1, bias_1 = self.conv1.weight, self.conv1.bias
+                weight_2, bias_2 = self.conv2.weight, self.conv2.bias
+                weight_2_2, bias_2_2 = self.conv2_2.weight, self.conv2_2.bias
+                weight_3, bias_3 = self.conv3.weight, self.conv3.bias
+
+        else:
+            if self.first:
+                weight_2, bias_2 = weights[layer_idx+'.conv2.weight'], weights[layer_idx+'.conv2.bias']
+                weight_3, bias_3 = weights[layer_idx+'.conv3.weight'], weights[layer_idx+'.conv3.bias']
+            else:
+                weight_1, bias_1 = weights[layer_idx+'.conv1.weight'], weights[layer_idx+'.conv1.bias']
+                weight_2, bias_2 = weights[layer_idx+'.conv2.weight'], weights[layer_idx+'.conv2.bias']
+                weight_2_2, bias_2_2 = weights[layer_idx+'.conv2_2.weight'], weights[layer_idx+'.conv2_2.bias']
+                weight_3, bias_3 = weights[layer_idx+'.conv3.weight'], weights[layer_idx+'.conv3.bias']
+            
+        #layer 1 conv, bn, relu
+        if self.first:
+            #upsample, layer 2 conv, bn, relu
+            y = self.pool(x)
+            # print("pooling:", x.size(), y.size())
+            y = conv2d(y, weight_2, bias_2, kernel_size=1, stride=1, padding=0)
+            if domain_label is not None:
+                y, _ = self.bn2(y, domain_label)
+            else:
+                y = self.bn2(y)
+            y = relu(y)
+
+            # print("concat:", prev.size(), y.size())
+            #concatenation of two layers
+            y = torch.cat([prev, y], 1)
+
+            #layer 3 conv, bn
+            y = conv2d(y, weight_3, bias_3)
+            if domain_label is not None:
+                y, _ = self.bn3(y, domain_label)
+            else:
+                y = self.bn3(y)
+            y = relu(y)
+
+        else:
+            x = conv2d(x, weight_1, bias_1, )
+            if domain_label is not None:
+                x, _ = self.bn1(x, domain_label)
+            else:
+                x = self.bn1(x)
+            x = relu(x)
+
+            #upsample, layer 2 conv, bn, relu
+            y = self.pool(x)
+            y = conv2d(y, weight_2, bias_2, kernel_size=1, stride=1, padding=0)
+            if domain_label is not None:
+                y, _ = self.bn2(y, domain_label)
+            else:
+                y = self.bn2(y)
+            y = relu(y)
+
+            prev = conv2d(prev, weight_2_2, bias_2_2, kernel_size=1, stride=1, padding=0)
+            if domain_label is not None:
+                prev, _ = self.bn2_2(prev, domain_label)
+            else:
+                prev = self.bn2_2(prev)
+            prev = relu(prev)
+
+            #concatenation of two layers
+            y = torch.cat([prev, y], 1)
+
+            #layer 3 conv, bn
+            y = conv2d(y, weight_3, bias_3)
+            if domain_label is not None:
+                y, _ = self.bn3(y, domain_label)
+            else:
+                y = self.bn3(y)
+            y = relu(y)
+
+        return y
+
+class Unet2D(nn.Module):
+    def __init__(self, c=1, n=16, norm='bn', num_classes=2, num_domains=4, momentum=0.1):
+        super(Unet2D, self).__init__()
+
+        self.convd1 = ConvD(c,     n, norm, first=True, num_domains=num_domains, momentum=momentum)
+        self.convd2 = ConvD(n,   2*n, norm, num_domains=num_domains, momentum=momentum)
+        self.convd3 = ConvD(2*n, 4*n, norm, num_domains=num_domains, momentum=momentum)
+        self.convd4 = ConvD(4*n, 8*n, norm, num_domains=num_domains, momentum=momentum)
+        self.convd5 = ConvD(8*n,16*n, norm, num_domains=num_domains, momentum=momentum)
+
+        self.convu4 = ConvU(16*n, norm, first=True, num_domains=num_domains, momentum=momentum)
+        self.convu3 = ConvU(8*n, norm, num_domains=num_domains, momentum=momentum)
+        self.convu2 = ConvU(4*n, norm, num_domains=num_domains, momentum=momentum)
+        self.convu1 = ConvU(2*n, norm, num_domains=num_domains, momentum=momentum)
+
+        #以降、追記部分
+        self.convu1_1 = ConvU(2*n, norm, first=True, num_domains=num_domains, momentum=momentum)
+        self.convu1_2 = ConvU(2*n, norm, num_domains=num_domains, momentum=momentum)
+        self.convu1_3 = ConvU(2*n, norm, num_domains=num_domains, momentum=momentum)
+
+        self.convu2_1 = ConvU(4*n, norm, first=True, num_domains=num_domains, momentum=momentum)
+        self.convu2_2 = ConvU(4*n, norm, num_domains=num_domains, momentum=momentum)
+
+        self.convu3_1 = ConvU(8*n, norm, first=True, num_domains=num_domains, momentum=momentum)
+
+        # self.seg1 = nn.Conv2d(2*n, num_classes, 1) #original decoder
+
+        self.seg1 = nn.Conv2d(2*n, num_classes, 1)
+        self.seg2 = nn.Conv2d(2*n, num_classes, 1)
+        self.seg3 = nn.Conv2d(2*n, num_classes, 1)
+        self.seg4 = nn.Conv2d(2*n, num_classes, 1)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.GroupNorm):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x, weights=None, domain_label=None):
+        if weights == None:
+            x1 = self.convd1(x, domain_label=domain_label)
+            x2 = self.convd2(x1, domain_label=domain_label)
+            x3 = self.convd3(x2, domain_label=domain_label)
+            x4 = self.convd4(x3, domain_label=domain_label)
+            x5 = self.convd5(x4, domain_label=domain_label)
+
+            y4 = self.convu4(x5, x4, domain_label=domain_label)
+
+            #以下、追記部分
+            y3_1 = self.convu3_1(x4, x3, domain_label=domain_label)
+            y3 = self.convu3(y4, y3_1, domain_label=domain_label)
+
+            y2_1 = self.convu2_1(x3, x2, domain_label=domain_label)
+            y2_2 = self.convu2_2(y3_1, y2_1, domain_label=domain_label)
+            y2 = self.convu2(y3, y2_2, domain_label=domain_label)
+
+            y1_1 = self.convu1_1(x2, x1, domain_label=domain_label)
+            y1_2 = self.convu1_2(y2_1, y1_1, domain_label=domain_label)
+            y1_3 = self.convu1_3(y2_2, y1_2, domain_label=domain_label)  
+            y1 = self.convu1(y2, y1_3, domain_label=domain_label)
+
+            y1_pred = conv2d(y1, self.seg1.weight, self.seg1.bias, kernel_size=None, stride=1, padding=0)
+            y2_pred = conv2d(y1_1, self.seg2.weight, self.seg2.bias, kernel_size=None, stride=1, padding=0)
+            y3_pred = conv2d(y1_2, self.seg3.weight, self.seg3.bias, kernel_size=None, stride=1, padding=0)
+            y4_pred = conv2d(y1_3, self.seg4.weight, self.seg4.bias, kernel_size=None, stride=1, padding=0)
+
+        else:
+            x1 = self.convd1(x, weights=weights, layer_idx='module.convd1', domain_label=domain_label)
+            x2 = self.convd2(x1, weights=weights, layer_idx='module.convd2', domain_label=domain_label)
+            x3 = self.convd3(x2, weights=weights, layer_idx='module.convd3', domain_label=domain_label)
+            x4 = self.convd4(x3, weights=weights, layer_idx='module.convd4', domain_label=domain_label)
+            x5 = self.convd5(x4, weights=weights, layer_idx='module.convd5', domain_label=domain_label)
+
+            y4 = self.convu4(x5, x4, weights=weights, layer_idx='module.convu4', domain_label=domain_label)
+            y3 = self.convu3(y4, x3, weights=weights, layer_idx='module.convu3', domain_label=domain_label)
+            y2 = self.convu2(y3, x2, weights=weights, layer_idx='module.convu2', domain_label=domain_label)
+            y1 = self.convu1(y2, x1, weights=weights, layer_idx='module.convu1', domain_label=domain_label)
+
+            #以下、追記部分
+            y3_1 = self.convu3_1(x4, x3, weights=weights, layer_idx='module.convu3_1',domain_label=domain_label)
+
+            y2_1 = self.convu2_1(x3, x2, weights=weights, layer_idx='module.convu2_1',domain_label=domain_label)
+            y2_2 = self.convu2_2(y3_1, y2_1, weights=weights, layer_idx='module.convu2_2',domain_label=domain_label)
+
+            y1_1 = self.convu1_1(x2, x1, weights=weights, layer_idx='module.convu1_1',domain_label=domain_label)
+            y1_2 = self.convu1_2(y2_1, y1_1, weights=weights, layer_idx='module.convu1_2',domain_label=domain_label)
+            y1_3 = self.convu1_3(y2_2, y1_2, weights=weights, layer_idx='module.convu1_3',domain_label=domain_label)  
+
+            y1_pred = conv2d(y1, weights['module.seg1.weight'], weights['module.seg1.bias'], kernel_size=None, stride=1, padding=0)
+            y2_pred = conv2d(y1_1, weights['module.seg2.weight'], weights['module.seg2.bias'], kernel_size=None, stride=1, padding=0)
+            y3_pred = conv2d(y1_2, weights['module.seg3.weight'], weights['module.seg3.bias'], kernel_size=None, stride=1, padding=0)
+            y4_pred = conv2d(y1_3, weights['module.seg4.weight'], weights['module.seg4.bias'], kernel_size=None, stride=1, padding=0)
+        
+        pred = (y1_pred + y2_pred + y3_pred + y4_pred) / 4
+        predictions = torch.sigmoid(input=pred)
+
+        return predictions

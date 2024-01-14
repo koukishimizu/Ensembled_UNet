@@ -1,0 +1,6 @@
+*.csv
+/result/
+__pycache__
+.ipynb_checkpoints
+/log/
+/loss_val/
