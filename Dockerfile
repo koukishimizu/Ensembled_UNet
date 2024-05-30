@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir \
 
 #　追加パッケージのインストール
 COPY requirements.txt /install/requirements.txt
-RUN pip3 install --upgrade pip
+#RUN pip3 install --upgrade pip
 RUN pip3 install -r /install/requirements.txt
 RUN pip3 install --no-cache-dir \
     praat-parselmouth

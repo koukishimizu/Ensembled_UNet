@@ -7,8 +7,8 @@ import csv
 
 from tqdm import tqdm
 from model.unetdsbn import Unet2D
-# from model.p_unetdsbn import Unet2D
 # from model.unetdsbn_e import Unet2D
+
 from utils.loss import dice_loss1
 from datasets.dataset import Dataset, ToTensor, CreateOnehotLabel
 
@@ -19,7 +19,7 @@ from torch.optim import Adam
 from torch.backends import cudnn
 from torch.nn import DataParallel
 from torch.utils.data import DataLoader
-
+from torch.utils.tensorboard import SummaryWriter
 
 parser = argparse.ArgumentParser('Dual Normalization U-Net Training')
 parser.add_argument('--data_dir', type=str, default='./data/brats/npz_data')
@@ -96,8 +96,8 @@ if __name__== '__main__':
     dataloader_2 = DataLoader(dataset_2, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn)
     dataloader_train.append(dataloader_2)
 
-    f = open("/works/model/loss_val/unet_dn_t2_128.csv", "w", encoding='shift_jis', newline='')
-    csvwriter = csv.writer(f)
+    writer = SummaryWriter("./runs/t1ce_240_unetdsbn_e")
+
     for epoch_num in range(max_epoch):
         data_iter = [repeat_dataloader(dataloader_train[i]) for i in range(2)]
         print('Epoch: {}, LR: {}'.format(epoch_num, round(exp_lr.get_last_lr()[0], 6)))
@@ -119,14 +119,13 @@ if __name__== '__main__':
 
                 outputs_soft = model(sample_data, domain_label=train_idx*torch.ones(sample_data.shape[0], dtype=torch.long))
                 loss = dice_loss1(outputs_soft, sample_label)
+                writer.add_scalar("Loss/train", loss, epoch_num)
                 total_loss += loss.item()
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
             
-            tbar.set_description('epoch: {}, Total Loss: {}'.format(epoch_num, round((total_loss / count), 6)))
-        csvwriter.writerow([round((total_loss / count), 6)])
-        
+            tbar.set_description('epoch: {}, Total Loss: {}'.format(epoch_num, round((total_loss / count), 6)))        
         exp_lr.step()
 
         if (epoch_num + 1) % save_step == 0:
@@ -141,4 +140,4 @@ if __name__== '__main__':
     end_time = datetime.datetime.now()
     print('Finish running. Cost total time: {} hours'.format((end_time - start_time).seconds / 3600))
 
-    f.close()
+    writer.close()

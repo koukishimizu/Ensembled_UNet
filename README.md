@@ -46,7 +46,7 @@ Test on target domains (T1, T1ce and Flair).
 python -W ignore test_dn_unet.py \
   --test_domain_list t1 t1ce flair --model_dir ./results/unet_dn_t2/model
   --batch_size 32 --save_label --label_dir ./vis/unet_dn_t2 --gpu_ids 0 \
-  --num_classes 2 --data_dir [Your BraTS2018 Path]/npz_data
+  --n_classes 2 --data_dir [Your BraTS2018 Path]/npz_data
 ```
 
 ## Acknowledgement

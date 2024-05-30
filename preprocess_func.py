@@ -97,7 +97,7 @@ def main(data_root, modality, target_root):
         masks = nib_mask.get_fdata()
         masks[masks != 0] = 1
 
-        w, h, c = 128, 128, slices.shape[2]
+        w, h, c = 120, 120, slices.shape[2]
         slices_dtype = slices.dtype
         masks_dtype = masks.dtype
         resize_slices = np.zeros((w, h, c), dtype=slices_dtype)
@@ -147,7 +147,7 @@ def make_test(data_root, modality, target_root):
         masks = nib_mask.get_fdata()
         masks[masks != 0] = 1
 
-        w, h, c = 128, 128, slices.shape[2]
+        w, h, c = 120, 120, slices.shape[2]
         slices_dtype = slices.dtype
         masks_dtype = masks.dtype
         resize_slices = np.zeros((w, h, c), dtype=slices_dtype)
@@ -169,12 +169,12 @@ def make_test(data_root, modality, target_root):
 
 if __name__ == '__main__':
     data_root = '/works/data/BRATS-2018/MICCAI_BraTS_2018_Data_Training/train'
-    target_root = '/works/data/BRATS-2018/MICCAI_BraTS_2018_Data_Training/npz_data_128_t2/train'
-    modality = 't2'
+    target_root = '/works/data/BRATS-2018/MICCAI_BraTS_2018_Data_Training/npz_data_120_t1ce/train'
+    modality = 't1ce'
     main(data_root, modality, target_root)
     del modality_name_list[modality]
 
     data_root = '/works/data/BRATS-2018/MICCAI_BraTS_2018_Data_Training/test'
-    target_root = '/works/data/BRATS-2018/MICCAI_BraTS_2018_Data_Training/npz_data_128_t2/test'
+    target_root = '/works/data/BRATS-2018/MICCAI_BraTS_2018_Data_Training/npz_data_120_t1ce/test'
     for modality in modality_name_list.keys():
         make_test(data_root, modality, target_root)

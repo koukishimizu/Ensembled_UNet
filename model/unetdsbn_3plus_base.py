@@ -28,12 +28,6 @@ def normalization(planes, norm='gn', num_domains=None, momentum=0.1):
         raise ValueError('Normalization type {} is not supporter'.format(norm))
     return m
 
-class ConvTwice(nn.Module):
-    def __init__(self, in_channel, out_channel, norm='bn', num_domains=None, momentum=0.1):
-        super(ConvTwice, self).__init__()
-
-        self.conv1 = nn.conv2d(in_channel, out_channel, 3, 1, 1, bias=True)
-
 #### Note: All are functional units except the norms, which are sequential
 class ConvD(nn.Module):
     def __init__(self, inplanes, planes, norm='bn', first=False, num_domains=None, momentum=0.1):

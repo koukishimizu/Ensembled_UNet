@@ -6,8 +6,8 @@ import csv
 
 from tqdm import tqdm
 from PIL import Image
-# from model.unetdsbn import Unet2D
-from model.p_unetdsbn import Unet2D
+from model.unetdsbn import Unet2D
+# from model.p_unetdsbn import Unet2D
 # from model.unetdsbn_e import Unet2D
 from utils.palette import color_map
 from datasets.dataset import Dataset, ToTensor, CreateOnehotLabel
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     if not os.path.exists(FLAGS.label_dir):
         os.mkdir(FLAGS.label_dir)
     
-    file = open("/works/model/unet_plus_64_e19_t2.csv", "w", encoding='shift_jis', newline="")
+    file = open("/works/model/demo.csv", "w", encoding='shift_jis', newline="")
     csv_writer = csv.writer(file)
     csv_writer.writerow(['modality', 'running dice', 'running hd', 'running asd', 'output'])
     value_list = []
@@ -72,8 +72,8 @@ if __name__ == '__main__':
         # Load trained model parameters
         # Add an auxiliary BN layer to compute target BN statistics
         model = Unet2D(num_classes=n_classes, num_domains=3, norm='dsbn')
-        # trained_state_dict = torch.load(os.path.join(model_dir, 'final_model.pth'))
-        trained_state_dict = torch.load(os.path.join(model_dir, 'epoch_19.pth'))
+        trained_state_dict = torch.load(os.path.join(model_dir, 'final_model.pth'))
+        # trained_state_dict = torch.load(os.path.join(model_dir, 'epoch_19.pth'))
         model_state_dict = model.state_dict()
         state_dict = {k:v for k, v in trained_state_dict.items() if k in model_state_dict.keys()}
         model_state_dict.update(state_dict)
