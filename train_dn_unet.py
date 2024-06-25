@@ -21,6 +21,8 @@ from torch.nn import DataParallel
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+import cv2
+
 parser = argparse.ArgumentParser('Dual Normalization U-Net Training')
 parser.add_argument('--data_dir', type=str, default='./data/brats/npz_data')
 parser.add_argument('--train_domain_list_1', nargs='+')
@@ -96,12 +98,12 @@ if __name__== '__main__':
     dataloader_2 = DataLoader(dataset_2, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn)
     dataloader_train.append(dataloader_2)
 
-    writer = SummaryWriter("./runs/t1ce_240_unetdsbn_e")
+    # writer = SummaryWriter("./runs/t1ce_240_unetdsbn_e")
 
     for epoch_num in range(max_epoch):
         data_iter = [repeat_dataloader(dataloader_train[i]) for i in range(2)]
-        print('Epoch: {}, LR: {}'.format(epoch_num, round(exp_lr.get_last_lr()[0], 6)))
-        tbar = tqdm(dataloader_train[0], ncols=150)
+        # print('Epoch: {}, LR: {}'.format(epoch_num, round(exp_lr.get_last_lr()[0], 6)))
+        tbar = tqdm(dataloader_train[0], dynamic_ncols=True)
         model.train()
         for i, batch in enumerate(tbar):
 
@@ -118,8 +120,10 @@ if __name__== '__main__':
                 sample_data, sample_label = sample_batches[train_idx]['image'].cuda(), sample_batches[train_idx]['onehot_label'].cuda()
 
                 outputs_soft = model(sample_data, domain_label=train_idx*torch.ones(sample_data.shape[0], dtype=torch.long))
+                # print(torch.unique(outputs_soft, return_counts=False))
+                # cv2.imwrite('/works/else{}.png'.format(count), outputs_soft.detach().cpu().numpy())
                 loss = dice_loss1(outputs_soft, sample_label)
-                writer.add_scalar("Loss/train", loss, epoch_num)
+                # writer.add_scalar("Loss/train", loss, epoch_num)
                 total_loss += loss.item()
                 optimizer.zero_grad()
                 loss.backward()
@@ -140,4 +144,4 @@ if __name__== '__main__':
     end_time = datetime.datetime.now()
     print('Finish running. Cost total time: {} hours'.format((end_time - start_time).seconds / 3600))
 
-    writer.close()
+    # writer.close()
